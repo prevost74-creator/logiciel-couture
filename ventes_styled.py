@@ -2,8 +2,6 @@ import os
 from style import section_titre
 import sqlite3
 from config import DB_PATH
-
-conn = sqlite3.connect(DB_PATH)
 from datetime import date
 
 import pandas as pd
@@ -93,6 +91,11 @@ def creer_table_vente_lignes(cursor):
         )
         """
     )
+
+
+def nettoyer_tables_backup(cursor):
+    cursor.execute("DROP TABLE IF EXISTS vente_lignes_backup")
+    cursor.execute("DROP TABLE IF EXISTS ventes_ancienne_backup")
 
 
 def migrer_ancienne_table_ventes(cursor):
@@ -304,6 +307,8 @@ def initialiser_tables_ventes():
         colonnes_lignes = [col[1] for col in get_columns(cursor, "vente_lignes")]
         if "photo_snapshot" not in colonnes_lignes:
             cursor.execute("ALTER TABLE vente_lignes ADD COLUMN photo_snapshot TEXT")
+
+        nettoyer_tables_backup(cursor)
 
         conn.commit()
     finally:
@@ -922,7 +927,6 @@ def afficher_page():
             for _, produit in lignes_vente.iterrows():
                 nom_produit = produit["nom_creation_snapshot"] or "Création"
                 st.write(f"- {nom_produit} (x{float(produit['quantite']):g})")
-
 
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:

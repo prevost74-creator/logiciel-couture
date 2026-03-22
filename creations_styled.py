@@ -1,8 +1,5 @@
 import streamlit as st
 import sqlite3
-from config import DB_PATH
-
-conn = sqlite3.connect(DB_PATH)
 import pandas as pd
 import os
 from style import section_titre
@@ -275,18 +272,38 @@ def afficher_page():
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT photo FROM creations WHERE id = ?", (creation_id,))
-        result = cursor.fetchone()
+        try:
+            cursor.execute("SELECT photo FROM creations WHERE id = ?", (creation_id,))
+            result = cursor.fetchone()
+            nom_photo = result[0] if result and result[0] else None
 
-        if result and result[0]:
-            supprimer_photo(result[0])
+            cursor.execute("DELETE FROM creation_tissus WHERE creation_id = ?", (creation_id,))
+            cursor.execute("DELETE FROM creation_accessoires WHERE creation_id = ?", (creation_id,))
+            cursor.execute("DELETE FROM creations WHERE id = ?", (creation_id,))
 
-        cursor.execute("DELETE FROM creation_tissus WHERE creation_id = ?", (creation_id,))
-        cursor.execute("DELETE FROM creation_accessoires WHERE creation_id = ?", (creation_id,))
-        cursor.execute("DELETE FROM creations WHERE id = ?", (creation_id,))
+            conn.commit()
 
-        conn.commit()
-        conn.close()
+            if nom_photo:
+                supprimer_photo(nom_photo)
+
+            return True
+
+        except sqlite3.IntegrityError as e:
+            conn.rollback()
+            st.error(
+                "Impossible de supprimer cette création : "
+                "elle est encore liée à d'autres données dans la base.\n\n"
+                f"Détail : {e}"
+            )
+            return False
+
+        except Exception as e:
+            conn.rollback()
+            st.error(f"Erreur lors de la suppression : {e}")
+            return False
+
+        finally:
+            conn.close()
 
     def modifier_creation(
         creation_id,
@@ -728,24 +745,26 @@ def afficher_page():
                 details_tissus = get_details_tissus(row["id"])
                 details_accessoires = get_details_accessoires(row["id"])
 
-                if not details_tissus.empty:
-                    st.markdown("**Tissus utilisés :**")
-                    for _, t in details_tissus.iterrows():
-                        st.write(
-                            f"- {t['nom_tissu']} | {float(t['longueur']):.2f} m x {float(t['largeur']):.2f} m | "
-                            f"{int(t['nombre_coupes'])} coupe(s) | {float(t['prix_m2']):.2f} €/m² | "
-                            f"Coût : {float(t['cout']):.2f} €"
-                        )
+                if not details_tissus.empty or not details_accessoires.empty:
+                    with st.expander("📦 Détail fabrication"):
+                        if not details_tissus.empty:
+                            st.markdown("**Tissus utilisés :**")
+                            for _, t in details_tissus.iterrows():
+                                st.write(
+                                    f"- {t['nom_tissu']} | {float(t['longueur']):.2f} m x {float(t['largeur']):.2f} m | "
+                                    f"{int(t['nombre_coupes'])} coupe(s) | {float(t['prix_m2']):.2f} €/m² | "
+                                    f"Coût : {float(t['cout']):.2f} €"
+                                )
 
-                if not details_accessoires.empty:
-                    st.markdown("**Accessoires utilisés :**")
-                    for _, a in details_accessoires.iterrows():
-                        unite_affichee = a["unite"] if pd.notna(a["unite"]) and a["unite"] else "unité"
-                        st.write(
-                            f"- {a['nom_accessoire']} | {float(a['quantite']):.2f} {unite_affichee} | "
-                            f"{float(a['prix_unitaire']):.2f} € / {unite_affichee} | "
-                            f"Coût : {float(a['cout']):.2f} €"
-                        )
+                        if not details_accessoires.empty:
+                            st.markdown("**Accessoires utilisés :**")
+                            for _, a in details_accessoires.iterrows():
+                                unite_affichee = a["unite"] if pd.notna(a["unite"]) and a["unite"] else "unité"
+                                st.write(
+                                    f"- {a['nom_accessoire']} | {float(a['quantite']):.2f} {unite_affichee} | "
+                                    f"{float(a['prix_unitaire']):.2f} € / {unite_affichee} | "
+                                    f"Coût : {float(a['cout']):.2f} €"
+                                )
 
                 col_btn1, col_btn2 = st.columns(2)
 
@@ -766,10 +785,12 @@ def afficher_page():
 
                 with col_yes:
                     if st.button("✅ Oui", key=f"creation_yes_{row['id']}"):
-                        supprimer_creation(row["id"])
+                        suppression_ok = supprimer_creation(row["id"])
                         st.session_state[f"creation_confirm_delete_{row['id']}"] = False
-                        st.success("Création supprimée.")
-                        st.rerun()
+
+                        if suppression_ok:
+                            st.success("Création supprimée.")
+                            st.rerun()
 
                 with col_no:
                     if st.button("❌ Non", key=f"creation_no_{row['id']}"):
